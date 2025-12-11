@@ -16,6 +16,7 @@ from typing import List, Dict, Any
 from fastapi.responses import JSONResponse
 
 from models.address import AddressCreate, AddressRead, AddressUpdate, AddressDelete, addresses_to_features
+from google.cloud import pubsub_v1
 
 # -----------------------------------------------------------------------------
 # Configuration
@@ -33,6 +34,10 @@ def get_db_connection():
         password=os.getenv("MYSQL_PASSWORD", "admin123"),
         database=os.getenv("MYSQL_DATABASE", "main_db"),
     )
+
+# Google pub/sub
+publisher = pubsub_v1.PublisherClient()
+topic_path = publisher.topic_path("cloud-475420", "address-created")
 
 # In-memory job store for async operations (demo purposes only)
 jobs: dict = {}
@@ -100,6 +105,17 @@ def create_address(address: AddressCreate, response: Response):
         {"rel": "self", "href": f"/addresses/{created.id}"},
         {"rel": "collection", "href": "/addresses"}
     ]
+
+    # Publish Pub/Sub event
+    event = {
+        "eventType": "address.created",
+        "addressId": str(created.id),
+        "payload": created.model_dump()
+    }
+
+    publisher.publish(topic_path, json.dumps(event).encode("utf-8"))
+    print("📨 Published address-created event:", event)
+
     response.headers["Location"] = f"/addresses/{created.id}"
     response.headers["ETag"] = compute_etag(created.model_dump())
     return created
